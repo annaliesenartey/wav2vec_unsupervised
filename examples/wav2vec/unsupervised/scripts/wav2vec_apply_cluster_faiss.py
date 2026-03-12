@@ -17,7 +17,7 @@ import torch.nn.functional as F
 
 from wav2vec_cluster_faiss import parse_faiss_specs, Wav2VecFeatureReader
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def get_parser():
     parser = argparse.ArgumentParser(description="apply clusters")
     # fmt: off
@@ -77,8 +77,8 @@ def main():
     print("Faiss Spec:", faiss_spec, file=sys.stderr)
 
     if faiss_spec.pca:
-        A = torch.from_numpy(np.load(osp.join(args.path, "pca_A.npy"))).cuda()
-        b = torch.from_numpy(np.load(osp.join(args.path, "pca_b.npy"))).cuda()
+        A = torch.from_numpy(np.load(osp.join(args.path, "pca_A.npy"))).to(device)
+        b = torch.from_numpy(np.load(osp.join(args.path, "pca_b.npy"))).to(device)
         print("Loaded PCA", file=sys.stderr)
 
     centroids = np.load(osp.join(args.path, "centroids.npy"))
