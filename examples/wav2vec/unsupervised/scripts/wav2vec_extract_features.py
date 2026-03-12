@@ -17,6 +17,8 @@ from npy_append_array import NpyAppendArray
 import fairseq
 import soundfile as sf
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# model.to(device)
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -40,7 +42,8 @@ class Wav2VecFeatureReader(object):
         )
         model = model[0]
         model.eval()
-        model.cuda()
+        # model.cuda()
+        model.to(device)
         self.model = model
         self.task = task
         self.layer = layer
@@ -55,7 +58,8 @@ class Wav2VecFeatureReader(object):
     def get_feats(self, loc):
         x = self.read_audio(loc)
         with torch.no_grad():
-            source = torch.from_numpy(x).float().cuda()
+            # source = torch.from_numpy(x).float().cuda()
+            source = torch.from_numpy(x).float().to(device)
             if self.task.cfg.normalize:
                 assert source.dim() == 1, source.dim()
                 with torch.no_grad():
