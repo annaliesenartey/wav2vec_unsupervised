@@ -15,7 +15,7 @@ from shutil import copyfile
 
 from npy_append_array import NpyAppendArray
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def get_parser():
     parser = argparse.ArgumentParser(
         description="transforms features via a given pca and stored them in target dir"
@@ -42,8 +42,8 @@ def main():
     print(f"data path: {data_poth}")
 
     features = np.load(data_poth + ".npy", mmap_mode="r")
-    pca_A = torch.from_numpy(np.load(args.pca_path + "_A.npy")).cuda()
-    pca_b = torch.from_numpy(np.load(args.pca_path + "_b.npy")).cuda()
+    pca_A = torch.from_numpy(np.load(args.pca_path + "_A.npy")).to(device)
+    pca_b = torch.from_numpy(np.load(args.pca_path + "_b.npy")).to(device)
 
     os.makedirs(args.save_dir, exist_ok=True)
     save_path = osp.join(args.save_dir, args.split)
@@ -67,7 +67,7 @@ def main():
         for b in tqdm.trange(batches):
             start = b * args.batch_size
             end = start + args.batch_size
-            x = torch.from_numpy(features[start:end]).cuda()
+            x = torch.from_numpy(features[start:end]).to(device)
             x = torch.matmul(x, pca_A) + pca_b
             npaa.append(x.cpu().numpy())
 
