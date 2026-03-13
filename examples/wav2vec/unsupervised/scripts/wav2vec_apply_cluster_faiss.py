@@ -97,6 +97,8 @@ def main():
         res = faiss.StandardGpuResources()
         # index = faiss.index_cpu_to_gpu(res, 0, index)
         faiss_index = faiss.index_cpu_to_gpu(res, 0, index_flat)
+    else:
+        faiss_index = index_flat
         
     faiss_index.add(centroids)
 
