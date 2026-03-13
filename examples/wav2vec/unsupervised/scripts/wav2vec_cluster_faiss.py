@@ -161,7 +161,9 @@ def main():
 
         gc.collect()
         # torch.cuda.empty_cache()
-        torch.to(device).empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # torch.to(device).empty_cache()
 
     reload = False
     for spec in faiss_specs:
