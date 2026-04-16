@@ -11,7 +11,7 @@ set -x                       # Print each command for debugging
 # Set these variables according to your environment
 
 # Main directories
-INSTALL_ROOT="$HOME/wav2vec_unsupervised"
+INSTALL_ROOT="$HOME/gans_project/wav2vec_unsupervised"
 FAIRSEQ_ROOT="$INSTALL_ROOT/fairseq_"
 KENLM_ROOT="$INSTALL_ROOT/kenlm"
 VENV_PATH="$INSTALL_ROOT/venv"
@@ -23,6 +23,10 @@ FLASHLIGHT_SEQ_ROOT="$INSTALL_ROOT/sequence"
 PYTHON_VERSION="3.10"  # Options: 3.7, 3.8, 3.9, 3.10
 CUDA="12.3"
 
+# Pip network: PyTorch wheels are large; default socket timeout (15s) is often too low on slow links.
+# Override before running setup: PIP_DEFAULT_TIMEOUT=900 ./run_setup.sh
+export PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-600}"
+export PIP_RETRIES="${PIP_RETRIES:-10}"
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -37,6 +41,46 @@ log() {
 # Check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# pyenv stores e.g. 3.10.20 under versions/, not literally "3.10". Resolve .../bin/python.
+resolve_pyenv_python_executable() {
+    local want="$1"
+    local prefix escaped resolved d
+    prefix="$(pyenv prefix "$want" 2>/dev/null || true)"
+    if [ -n "$prefix" ] && [ -x "$prefix/bin/python" ]; then
+        printf '%s\n' "$prefix/bin/python"
+        return 0
+    fi
+    escaped="$(printf '%s' "$want" | sed 's/\./\\./g')"
+    resolved="$(pyenv versions --bare 2>/dev/null | grep -E "^${escaped}(\\.[0-9]+)*\$" | sort -V | tail -1)" || true
+    if [ -n "$resolved" ]; then
+        prefix="$(pyenv prefix "$resolved" 2>/dev/null || true)"
+        if [ -n "$prefix" ] && [ -x "$prefix/bin/python" ]; then
+            printf '%s\n' "$prefix/bin/python"
+            return 0
+        fi
+    fi
+    for d in "$PYENV_ROOT"/versions/*/; do
+        [ -d "$d" ] || continue
+        d="${d%/}"
+        case "$(basename "$d")" in
+            "${want}"|"${want}".*)
+                if [ -x "$d/bin/python" ]; then
+                    printf '%s\n' "$d/bin/python"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
+}
+
+# Remove pip --hash= pins from a requirements file. Any --hash= enables pip's
+# hash-checking mode; pins often fail when the selected wheel differs (OS/arch,
+# index) from the one used when hashes were generated.
+strip_requirements_hashes() {
+    sed -e '/^[[:space:]]*--hash=/d' -e 's/[[:space:]]*--hash=[^[:space:]]*//g' "$1"
 }
 
 get_system_cuda_suffix() {
@@ -58,43 +102,89 @@ create_dirs() {
 # ==================== SETUP STEPS ====================
 setup_venv() {
     log "Setting up Python virtual environment..."
-    
-     #setting up pyenv to tackle linkage errors, protobuf requires a python environment which is not static 
-    export PYENV_ROOT="$HOME/.pyenv"
 
-    # Install pyenv ONLY if not already installed
-    if [ ! -d "$PYENV_ROOT" ]; then
-        curl -fsSL https://pyenv.run | bash
-            export PYENV_ROOT="$HOME/.pyenv"
-            [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-            eval "$(pyenv init - bash)"
-        echo "Detected Python version: $PYTHON_VERSION"
-        env PYTHON_CONFIGURE_OPTS="--enable-shared" pyenv install $PYTHON_VERSION
-        pyenv local $PYTHON_VERSION
-    else
-        log "Python $PYENV_ROOT already installed."
+    # pyenv: needed when apt cannot install python3-venv (e.g. 403 / mirror) or for linkage issues
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    if command -v pyenv >/dev/null 2>&1; then
+        eval "$(pyenv init - bash)"
     fi
-   
-    
+
+    use_pyenv_for_venv=0
+    if [ "${USE_PYENV_FOR_VENV:-0}" = "1" ] || ! python3 -c "import venv" 2>/dev/null; then
+        use_pyenv_for_venv=1
+    fi
+
+    if [ "$use_pyenv_for_venv" = "1" ]; then
+        log "Creating venv with pyenv Python ${PYTHON_VERSION} (system python3-venv not available)."
+        if [ ! -d "$PYENV_ROOT" ] || [ ! -x "$PYENV_ROOT/bin/pyenv" ]; then
+            curl -fsSL https://pyenv.run | bash
+        fi
+        export PATH="$PYENV_ROOT/bin:$PATH"
+        if [ ! -x "$PYENV_ROOT/bin/pyenv" ]; then
+            log "[ERROR] pyenv not found at $PYENV_ROOT/bin/pyenv after install. Add to PATH: export PATH=\"\$HOME/.pyenv/bin:\$PATH\""
+            exit 1
+        fi
+        eval "$(pyenv init - bash)"
+        if ! env PYTHON_CONFIGURE_OPTS="--enable-shared" pyenv install -s "$PYTHON_VERSION"; then
+            log "[ERROR] pyenv install $PYTHON_VERSION failed (missing build deps or network). See: https://github.com/pyenv/pyenv/wiki#suggested-build-environment"
+            exit 1
+        fi
+        if ! pyenv_python="$(resolve_pyenv_python_executable "$PYTHON_VERSION")"; then
+            log "[ERROR] Could not resolve pyenv Python for $PYTHON_VERSION under $PYENV_ROOT/versions. Run: pyenv versions && pyenv install -v $PYTHON_VERSION"
+            exit 1
+        fi
+        log "[INFO] Using pyenv interpreter: $pyenv_python"
+    else
+        if [ ! -d "$PYENV_ROOT" ]; then
+            curl -fsSL https://pyenv.run | bash
+            export PATH="$PYENV_ROOT/bin:$PATH"
+            eval "$(pyenv init - bash)"
+            echo "Detected Python version: $PYTHON_VERSION"
+            env PYTHON_CONFIGURE_OPTS="--enable-shared" pyenv install -s "$PYTHON_VERSION"
+            (cd "$INSTALL_ROOT" 2>/dev/null && pyenv local "$PYTHON_VERSION") || true
+        else
+            log "pyenv already present at $PYENV_ROOT"
+        fi
+        pyenv_python=""
+    fi
+
     if [ -d "$VENV_PATH" ]; then
         log "Virtual environment already exists at $VENV_PATH"
     else
-        # python${PYTHON_VERSION} -m venv "$VENV_PATH"
-        python3 -m venv "$VENV_PATH"
+        if [ "$use_pyenv_for_venv" = "1" ]; then
+            "$pyenv_python" -m venv "$VENV_PATH"
+        else
+            python3 -m venv "$VENV_PATH"
+        fi
         log "Created virtual environment at $VENV_PATH"
     fi
-    
-    # Activate virtual environment
-    source "$VENV_PATH/bin/activate"
 
+    source "$VENV_PATH/bin/activate"
     log "Python virtual environment setup completed."
 }
 
 #installing_python_basic_dependencies
 basic_dependencies(){
     sudo apt-get update
+    # Broken python3.*-venv (half-installed without python3-pip-whl) makes *every* apt install fail.
+    # Removing the project venv/ folder does not fix system dpkg — repair apt first.
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y || true
+    export USE_PYENV_FOR_VENV=0
+    # Satisfy venv stack (Ubuntu 24.04+: python3.12-venv -> python3-pip-whl). Fetch can fail (403 / mirror).
+    if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip-whl python3-venv; then
+        log "[WARN] Retrying: removing half-configured python3.12-venv, then installing python3-pip-whl..."
+        sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y python3.12-venv 2>/dev/null || true
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y || true
+        if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip-whl python3-venv; then
+            log "[WARN] apt could not install python3-pip-whl (network/mirror). Clearing broken venv packages and using pyenv-built Python for the project venv instead."
+            export USE_PYENV_FOR_VENV=1
+            sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y python3.12-venv python3-venv 2>/dev/null || true
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y || true
+        fi
+    fi
     # Install Python 3, pip, and essential development packages (for compiling C extensions)
-    sudo apt-get install -y python3 python3-pip python3-dev build-essential 
+    sudo apt-get install -y python3 python3-pip python3-dev build-essential
     sudo apt-get install autoconf automake cmake curl g++ git graphviz libatlas3-base libtool make pkg-config subversion unzip wget zlib1g-dev gfortran
     sudo apt update
     sudo apt install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev wget curl
@@ -177,7 +267,9 @@ install_pytorch_and_other_packages() {
     source "$VENV_PATH/bin/activate"
   
     
-    pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url "https://download.pytorch.org/whl/cu121"
+    pip install --retries "${PIP_RETRIES}" --timeout "${PIP_DEFAULT_TIMEOUT}" \
+        torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 \
+        --index-url "https://download.pytorch.org/whl/cu121"
 
     # Install other required packages
     pip install "numpy<2" scipy tqdm sentencepiece soundfile librosa editdistance tensorboardX packaging soundfile
@@ -225,9 +317,14 @@ install_fairseq() {
     # Install wav2vec specific requirements if the file exists
     local wav2vec_req_file="$FAIRSEQ_ROOT/examples/wav2vec/requirements.txt"
     if [ -f "$wav2vec_req_file" ]; then
-        log "Installing wav2vec specific requirements from $wav2vec_req_file..."
-        pip install -r "$wav2vec_req_file" \
-            || { log "[WARN] Failed to install some wav2vec requirements. Check $wav2vec_req_file."; }
+        log "Installing wav2vec specific requirements from $wav2vec_req_file (hash pins stripped for compatibility)..."
+        local wav2vec_req_stripped
+        wav2vec_req_stripped="$(mktemp)" || { log "[ERROR] mktemp failed."; exit 1; }
+        strip_requirements_hashes "$wav2vec_req_file" > "$wav2vec_req_stripped"
+        pip install --retries "${PIP_RETRIES}" --timeout "${PIP_DEFAULT_TIMEOUT}" \
+            -r "$wav2vec_req_stripped" \
+            || { rm -f "$wav2vec_req_stripped"; log "[WARN] Failed to install some wav2vec requirements. Check $wav2vec_req_file."; }
+        rm -f "$wav2vec_req_stripped"
     else
         log "[INFO] No specific requirements file found at $wav2vec_req_file."
     fi
@@ -332,26 +429,32 @@ install_flashlight() {
 
     export USE_CUDA=1 # Set if building for CUDA
 
+    local use_cuda_flag
     if ! command -v nvcc &> /dev/null; then
         log "[INFO] nvcc not found. Switching to CPU-only build."
         use_cuda_flag="-DFLASHLIGHT_USE_CUDA=OFF"
         export USE_CUDA=0
+    else
+        use_cuda_flag="-DFLASHLIGHT_USE_CUDA=ON"
+        export USE_CUDA=1
+    fi
+
     # Explicitly point CMake to the Python executable in the venv for robustness
     local python_executable="$VENV_PATH/bin/python"
     cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DPYTHON_EXECUTABLE="$python_executable" \
              "$flashlight_python_flag" \
-             "$use_cuda_flag" \
+             "$use_cuda_flag"
 
     # Build the C++ library AND Python bindings
     log "Building Flashlight sequence (C++ and Python)..."
-    cmake --build . --config Release --parallel "$(nproc)" \
-     
+    cmake --build . --config Release --parallel "$(nproc)"
+
     # Install the Python Bindings into the ACTIVE virtual environment
     log "Installing Flashlight sequence Python bindings into venv..."
     # This assumes setup.py or similar is generated in the build directory.
     cd ..
-    pip install . \
+    pip install .
 
     log "[PASS] Flashlight Python bindings installed via pip."
 

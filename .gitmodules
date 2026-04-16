@@ -1,0 +1,6 @@
+[submodule "fairseq_"]
+	path = fairseq_
+	url = https://github.com/Ashesi-Org/fairseq_.git
+[submodule "kenlm"]
+	path = kenlm
+	url = https://github.com/kpu/kenlm.git

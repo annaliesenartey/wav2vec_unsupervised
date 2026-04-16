@@ -1,0 +1,32 @@
+# Local caches and runtime outputs
+.hf_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+logs/
+outputs/
+multirun/
+
+# Local environment
+venv/
+
+# Large local data and model artifacts (keep local, do not push)
+data/
+pre-trained/
+lid_model/
+rVADfast/
+sequence/
+modal/
+
+# One-off scratch files
+anna.txt
+app.log
+
+# Optional local helper artifacts not needed in fork by default
+download_librispeech_for_wav2vec.sh
+export_librispeech_for_wav2vec.py
+export_waxal_for_wav2vec.py
+reset_wav2vec_pipeline.sh
+GAN_ARCHITECTURE_REPORT.md

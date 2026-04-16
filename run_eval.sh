@@ -1,24 +1,19 @@
 #!/bin/bash
+# Usage: ./run_eval.sh <checkpoint.pt path relative to DIR_PATH>
+# Example: ./run_eval.sh outputs/2026-04-11/15-46-08/checkpoint_best.pt
 
-# Source the function definitions
+set -eo pipefail
 
+if [ -z "${1:-}" ]; then
+  echo "Usage: $0 <checkpoint.pt path relative to DIR_PATH (see utils.sh)>" >&2
+  exit 1
+fi
+
+# shellcheck source=eval_functions.sh
 source "$(dirname "$0")/eval_functions.sh"
 
 create_dirs
-activate_venv 
-#the trained checkpoints from train_gans will be stored in a folder called multirun. The checkpoint will be stored in this format 
-#multirun --
- #         |
- #         day/month/year --
- #                         |
- #                         time --
- #                                |
- #                                checkpoint_best.pt
- #                                 checkpoint_last.pt
- #therefore it is advisable to manually provide the path to the exact checkpoint to use under the variable $CHECKPOINT_DIR  in the run_wav2vec.sh script
- 
+activate_venv
+setup_path
 
-#Transcriptions from the GAN model 
-#     transcription_gans_viterbi: outputs phonetic transcription in variable name $GANS_OUTPUT_PHONES
-
-    transcription_gans_viterbi  #for these we need both train and validation since the train will be used by the HMM
+transcription_gans_viterbi

@@ -5,7 +5,7 @@
 
 # Main directories
 #.... directories to add to root.......
-DIR_PATH="$HOME/wav2vec_unsupervised" # the root directory of the project
+DIR_PATH="${WAV2VEC_UNSUPERVISED_ROOT:-$HOME/gans_project/wav2vec_unsupervised}" # project root
 DATA_ROOT="$DIR_PATH/data" # a folder that stores all the data generated from pipeline
 FAIRSEQ_ROOT="$DIR_PATH/fairseq_" # the root directory of the fairseq repository
 KENLM_ROOT="$DIR_PATH/kenlm/build/bin"  # Path to KenLM installation
@@ -36,8 +36,8 @@ LANG="en"
 FASTTEXT_LIB_MODEL="$DIR_PATH/lid_model/lid.176.bin"  # the path to the language identification model
 MODEL="$DIR_PATH/pre-trained/wav2vec_vox_new.pt" # the path to the pre-trained wav2vec model for audio feature extraction
 
-# Dataset specifics
-DATASET_NAME="librispeech"
+# Dataset specifics (must match the folder under data/clustering/ you built features in)
+DATASET_NAME="${WAV2VEC_DATASET_NAME:-librispeech_hf}"
 
 # Output directories (will be created if they don't exist)
 MANIFEST_DIR="$DATA_ROOT/manifests" # the directory that stores the manifest files for the audio dataset

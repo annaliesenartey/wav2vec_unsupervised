@@ -215,10 +215,69 @@ create_rVADfast() {
     
     log "removing silence from audios"
     mark_in_progress "$step_name"
-    python "$DIR_PATH/vads.py" -r $RVAD_ROOT < "$MANIFEST_DIR/train.tsv" > "$MANIFEST_DIR/train.vads"
-    python "$DIR_PATH/vads.py" -r $RVAD_ROOT < "$MANIFEST_DIR/valid.tsv" > "$MANIFEST_DIR/valid.vads"
+
+    local train_tsv="$MANIFEST_DIR/train.tsv"
+    local valid_tsv="$MANIFEST_DIR/valid.tsv"
+    local train_vads="$MANIFEST_DIR/train.vads"
+    local valid_vads="$MANIFEST_DIR/valid.vads"
+    local expected_train expected_valid existing_train existing_valid
+
+    expected_train=$(wc -l < "$train_tsv")
+    expected_valid=$(wc -l < "$valid_tsv")
+    existing_train=0
+    existing_valid=0
+
+    if [ -f "$train_vads" ]; then
+        existing_train=$(wc -l < "$train_vads")
+    fi
+    if [ -f "$valid_vads" ]; then
+        existing_valid=$(wc -l < "$valid_vads")
+    fi
+
+    if [ "$existing_train" -ge "$expected_train" ] && [ "$existing_valid" -ge "$expected_valid" ]; then
+        log "Found complete VAD outputs; marking step as completed"
+        mark_completed "$step_name"
+        return 0
+    fi
+
+    # Resume TRAIN vads generation from existing progress.
+    if [ "$existing_train" -lt "$expected_train" ]; then
+        local train_manifest_remaining train_vads_chunk
+        train_manifest_remaining=$(mktemp)
+        train_vads_chunk=$(mktemp)
+
+        awk -v done_lines="$existing_train" 'NR==1 || NR>done_lines' "$train_tsv" > "$train_manifest_remaining"
+        python "$DIR_PATH/vads.py" -r "$RVAD_ROOT" < "$train_manifest_remaining" > "$train_vads_chunk"
+
+        if [ "$existing_train" -gt 0 ]; then
+            awk 'NR>1' "$train_vads_chunk" >> "$train_vads"
+        else
+            mv "$train_vads_chunk" "$train_vads"
+        fi
+
+        rm -f "$train_manifest_remaining" "$train_vads_chunk"
+    fi
+
+    # Resume VALID vads generation from existing progress.
+    if [ "$existing_valid" -lt "$expected_valid" ]; then
+        local valid_manifest_remaining valid_vads_chunk
+        valid_manifest_remaining=$(mktemp)
+        valid_vads_chunk=$(mktemp)
+
+        awk -v done_lines="$existing_valid" 'NR==1 || NR>done_lines' "$valid_tsv" > "$valid_manifest_remaining"
+        python "$DIR_PATH/vads.py" -r "$RVAD_ROOT" < "$valid_manifest_remaining" > "$valid_vads_chunk"
+
+        if [ "$existing_valid" -gt 0 ]; then
+            awk 'NR>1' "$valid_vads_chunk" >> "$valid_vads"
+        else
+            mv "$valid_vads_chunk" "$valid_vads"
+        fi
+
+        rm -f "$valid_manifest_remaining" "$valid_vads_chunk"
+    fi
+
     # Check if the command was successful
-    if [ $? -eq 0 ]; then
+    if [ "$(wc -l < "$train_vads")" -ge "$expected_train" ] && [ "$(wc -l < "$valid_vads")" -ge "$expected_valid" ]; then
         mark_completed "$step_name"
         log "silence removed successfully"
     else
@@ -350,6 +409,10 @@ prepare_audio() {
     
     log "audio preparation"
     mark_in_progress "$step_name"
+
+    # Avoid cuDNN v8 conv plan failures on some drivers/WSL (CUDNN_STATUS_NOT_SUPPORTED on conv1d).
+    export TORCH_CUDNN_V8_API_DISABLED=1
+    log "TORCH_CUDNN_V8_API_DISABLED=1 (cuDNN v8 heuristic API disabled for this step)"
 
     zsh "$FAIRSEQ_ROOT/examples/wav2vec/unsupervised/scripts/prepare_audio.sh" "$MANIFEST_NONSIL_DIR" $CLUSTERING_DIR $MODEL 512 14
 

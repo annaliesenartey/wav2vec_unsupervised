@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Source the function definitions
-source "$(dirname "$0")/wav2vec_functions.sh"
+# Source the function definitions (train_dir val_dir test_dir unlabeled_text.txt)
+# shellcheck source=wav2vec_functions.sh
+source "$(dirname "$0")/wav2vec_functions.sh" "$1" "$2" "$3" "$4"
 
 create_dirs #creates directories for storing outputs from the different steps 
 
