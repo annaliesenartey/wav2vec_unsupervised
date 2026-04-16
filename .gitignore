@@ -6,7 +6,13 @@ __pycache__/
 *.pyd
 *.log
 logs/
-outputs/
+# Hydra outputs: ignore all except the pinned reference run (see README_PIPELINE.md)
+outputs/*
+!outputs/2026-04-12/
+outputs/2026-04-12/*
+!outputs/2026-04-12/21-41-55/
+outputs/2026-04-12/21-41-55/*
+!outputs/2026-04-12/21-41-55/**
 multirun/
 
 # Local environment
@@ -30,3 +36,6 @@ export_librispeech_for_wav2vec.py
 export_waxal_for_wav2vec.py
 reset_wav2vec_pipeline.sh
 GAN_ARCHITECTURE_REPORT.md
+
+# After *.log: allow versioning this Hydra log (must be last for this path)
+!outputs/2026-04-12/21-41-55/hydra_train.log

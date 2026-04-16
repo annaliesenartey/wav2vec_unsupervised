@@ -51,20 +51,29 @@ train_gans(){
             ~optimizer.groups.discriminator.optimizer.amsgrad \
             2>&1 | tee $RESULTS_DIR/training1.log
    else
-   # Single run; defaults from w2vu.yaml (50% train audio, max_update in yaml).
+   # code_penalty=6, smoothness=2, smoothing=0.1, disc_dropout=0.1, clip_norm=0.5,
+   # G LR 2e-5 / D LR 1e-5 (2:1), fp16 off; max_update=20000; 50% train audio.
    PYTHONPATH="${DIR_PATH}:${FAIRSEQ_ROOT}:${PYTHONPATH:-}" PREFIX=w2v_unsup_gan_xp fairseq-hydra-train \
     --config-dir "$FAIRSEQ_ROOT/examples/wav2vec/unsupervised/config/gan" \
     --config-name w2vu \
+    task.train_audio_subsample_ratio=0.5 \
     task.data="$CLUSTERING_DIR/precompute_pca512_cls128_mean_pooled" \
     task.text_data="$TEXT_OUTPUT/phones/" \
     task.kenlm_path="$TEXT_OUTPUT/phones/lm.phones.filtered.04.bin" \
     common.user_dir="$FAIRSEQ_ROOT/examples/wav2vec/unsupervised" \
     common.seed=0 \
-    model.input_dim=1024 \
-    model.discriminator_dim=256 model.gradient_penalty=2.0 model.code_penalty=6.0 \
-    model.smoothness_weight=2.0 model.smoothing=0.1 model.discriminator_dropout=0.1 \
-    optimization.clip_norm=0.5 \
     common.fp16=false \
+    model.input_dim=1024 \
+    model.discriminator_dim=256 \
+    model.discriminator_depth=2 \
+    model.gradient_penalty=0.5 \
+    model.code_penalty=6.0 \
+    model.smoothness_weight=2.0 \
+    model.smoothing=0.1 \
+    model.discriminator_dropout=0.1 \
+    optimization.max_update=20000 \
+    optimization.clip_norm=0.5 \
+    dataset.num_workers=2 \
     +optimizer.groups.generator.optimizer.lr="[0.00002]" \
     +optimizer.groups.discriminator.optimizer.lr="[0.00001]" \
     ~optimizer.groups.generator.optimizer.amsgrad \
